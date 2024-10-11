@@ -200,7 +200,7 @@ function sendMessage() {
     let message = messageInput.value.trim();
     if (message) {
         // 添加提示詞
-        message = "請用繁體中文回答：" + message;
+        // message = "請用繁體中文回答：" + message;
         
         ws.send(JSON.stringify({
             type: "conversation.item.create",
@@ -209,18 +209,19 @@ function sendMessage() {
                 role: "user",
                 content: [
                     {
-                        type: "text",
+                        type: "input_text",
                         text: message
                     }
                 ]
             }
         }));
+        // The voice the model uses to respond - one of alloy, echo, or shimmer.
         ws.send(JSON.stringify({
             type: "response.create",
             response: {
                 modalities: ["text", "audio"],
                 instructions: "Please assist the user in Traditional Chinese.",
-                voice: "alloy",
+                voice: "shimmer",
                 output_audio_format: "pcm16",
                 tools: [
                     {
@@ -238,8 +239,7 @@ function sendMessage() {
                     }
                 ],
                 tool_choice: "auto",
-                temperature: 0.7,
-                max_output_tokens: 150
+                temperature: 0.7
             }
         }));
         addMessage('你', message, 'sent');
@@ -291,8 +291,8 @@ function createAndPlayAudio() {
         const mergedAudioData = wavtools.mergeFloat32Arrays(audioArrays);
         console.log('合併後的音頻數據長度:', mergedAudioData.length);
 
-        // 使用固定的採樣率，這裡假設為 16000 Hz（常見的語音採樣率）
-        const sampleRate = 44100  ;
+        // 使用固定的採樣率
+        const sampleRate = 26500 ;
         const numChannels = 1; // 假設為單聲道
 
         // 創建 WAV 文件
