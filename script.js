@@ -91,7 +91,7 @@ function sendMessage() {
         ws.send(JSON.stringify({ 
             type: "response.create",
             response:{
-                modalities: ["text", "audio"],
+                modalities: ["text"],
                 instructions: message,
             } 
         }));

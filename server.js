@@ -29,8 +29,8 @@ wss.on('connection', function connection(ws) {
     });
 
     ws.on('message', function incoming(message) {
-        openaiWs.send(message);
-        console.log('send message to openaiWs', message);
+        openaiWs.send(JSON.stringify(JSON.parse(message.toString())));
+        console.log('send message to openaiWs', JSON.stringify(JSON.parse(message.toString())));
     });
 
     ws.on('close', function close() {
