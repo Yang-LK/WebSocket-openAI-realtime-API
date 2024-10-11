@@ -8,44 +8,24 @@ const sendButton = document.getElementById('sendButton');
 let currentAIMessage = '';
 let currentAudioTranscript = '';
 let audioBuffer = [];
-let isPlaying = false;
 
 // 開啟後執行的動作
 ws.onopen = () => {
-    console.log('開啟連接')
+    console.log('開啟連接');
     addMessage('系統', '已連接到聊天室', 'received');
 }
 
 // 關閉後執行的動作
 ws.onclose = () => {
-    console.log('關閉連接')
+    console.log('關閉連接');
     addMessage('系統', '已斷開連接', 'received');
 }
 
 // 接收 Server 發送的訊息
-ws.onmessage = async event => {
+ws.onmessage = event => {
     console.log('接收到的原始數據:', event.data);
 
-    let message;
-    if (event.data instanceof Blob) {
-        // 處理 Blob 數據
-        try {
-            const text = await event.data.text();
-            message = JSON.parse(text);
-        } catch (error) {
-            console.error('無法解析 Blob 數據:', error);
-            return;
-        }
-    } else {
-        // 處理文本數據
-        try {
-            message = JSON.parse(event.data);
-        } catch (error) {
-            console.error('無法解析消息為 JSON:', error);
-            return;
-        }
-    }
-
+    const message = JSON.parse(event.data);
     console.log('解析後的消息:', message);
 
     // 處理解析後的消息
@@ -54,17 +34,10 @@ ws.onmessage = async event => {
             console.log('新聊天已創建:', message.session);
             break;
         case 'response.created':
-            console.log('response.created');
-            break;
         case 'rate_limits.updated':
-            console.log('rate_limits.updated');
-            break;
-        case 'response.output_item.added':
         case 'conversation.item.created':
-            console.log('conversation.item.created');
-            break;
         case 'response.content_part.added':
-            console.log('response.content_part.added');
+            console.log(message.type);
             break;
         case 'response.text.delta':
             if (message.delta) {
@@ -73,11 +46,9 @@ ws.onmessage = async event => {
             }
             break;
         case 'response.text.done':
-            console.log('response.text.done');
-            break;
         case 'response.content_part.done':
         case 'response.output_item.done':
-            console.log('response.output_item.done');
+            console.log(message.type);
             break;
         case 'response.done':
             console.log('response.done');
@@ -159,14 +130,11 @@ function playAudio() {
         const audioBlob = new Blob(audioBuffer, { type: 'audio/wav' });
         const audioUrl = URL.createObjectURL(audioBlob);
         
-        // 創建新的音頻元素
         const audioElement = new Audio(audioUrl);
-        audioElement.controls = true; // 添加控制條
+        audioElement.controls = true;
         
-        // 將音頻元素添加到頁面中
         document.body.appendChild(audioElement);
         
-        // 播放音頻
         audioElement.play();
 
         audioElement.onended = () => {
