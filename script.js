@@ -27,10 +27,8 @@ ws.onclose = () => {
 
 // 接收 Server 發送的訊息
 ws.onmessage = event => {
-    // console.log('接收到的原始數據:', event.data);
-
     const message = JSON.parse(event.data);
-    console.log('解析後的消息:', message);
+    console.log('收到的完整消息:', message);
 
     // 處理解析後的消息
     switch (message.type) {
@@ -45,6 +43,7 @@ ws.onmessage = event => {
             break;
         case 'response.text.delta':
             if (message.delta) {
+                console.log('收到的文本增量:', message.delta);
                 currentAIMessage += message.delta;
                 updateLastAIMessage(currentAIMessage);
             }
@@ -147,11 +146,31 @@ function sendAudioMessage() {
                 ]
             }
         }));
-        // 发送 response.create 事件来触发 AI 的响应
         ws.send(JSON.stringify({
             type: "response.create",
             response: {
-                modalities: ["text", "audio"]
+                modalities: ["text", "audio"],
+                instructions: "Please assist the user in Traditional Chinese.",
+                voice: "alloy",
+                output_audio_format: "pcm16",
+                tools: [
+                    {
+                        type: "function",
+                        name: "calculate_sum",
+                        description: "Calculates the sum of two numbers.",
+                        parameters: {
+                            type: "object",
+                            properties: {
+                                a: { type: "number" },
+                                b: { type: "number" }
+                            },
+                            required: ["a", "b"]
+                        }
+                    }
+                ],
+                tool_choice: "auto",
+                temperature: 0.7,
+                max_output_tokens: 150
             }
         }));
     };
@@ -178,8 +197,11 @@ function addAudioMessage(sender, audioUrl, isAI = false) {
 
 // 发送文字消息
 function sendMessage() {
-    const message = messageInput.value.trim();
+    let message = messageInput.value.trim();
     if (message) {
+        // 添加提示詞
+        message = "請用繁體中文回答：" + message;
+        
         ws.send(JSON.stringify({
             type: "conversation.item.create",
             item: {
@@ -196,7 +218,28 @@ function sendMessage() {
         ws.send(JSON.stringify({
             type: "response.create",
             response: {
-                modalities: ["text", "audio"]
+                modalities: ["text", "audio"],
+                instructions: "Please assist the user in Traditional Chinese.",
+                voice: "alloy",
+                output_audio_format: "pcm16",
+                tools: [
+                    {
+                        type: "function",
+                        name: "calculate_sum",
+                        description: "Calculates the sum of two numbers.",
+                        parameters: {
+                            type: "object",
+                            properties: {
+                                a: { type: "number" },
+                                b: { type: "number" }
+                            },
+                            required: ["a", "b"]
+                        }
+                    }
+                ],
+                tool_choice: "auto",
+                temperature: 0.7,
+                max_output_tokens: 150
             }
         }));
         addMessage('你', message, 'sent');
@@ -238,98 +281,46 @@ messageInput.addEventListener('keypress', function(e) {
     }
 });
 
-// 新的函数用于创建和播放音频
+// 修改 createAndPlayAudio 函数
 function createAndPlayAudio() {
     if (audioDeltas.length > 0) {
-        console.log('Creating audio from', audioDeltas.length, 'deltas');
+        console.log('創建音頻，來自', audioDeltas.length, '個 delta');
         
-        // 将所有 base64 编码的音频数据合并成一个字符串
-        const mergedBase64 = audioDeltas.join('');
-        console.log('Merged base64 length:', mergedBase64.length);
+        // 將所有 base64 編碼的音頻數據轉換為 Float32Array 並合併
+        const audioArrays = audioDeltas.map(delta => wavtools.base64ToFloat32Array(delta));
+        const mergedAudioData = wavtools.mergeFloat32Arrays(audioArrays);
+        console.log('合併後的音頻數據長度:', mergedAudioData.length);
 
-        // 转换为 Float32Array
-        const float32Array = base64ToFloat32Array(mergedBase64);
+        // 使用固定的採樣率，這裡假設為 16000 Hz（常見的語音採樣率）
+        const sampleRate = 44100  ;
+        const numChannels = 1; // 假設為單聲道
 
-        // 转换为 16-bit PCM
-        const pcmBuffer = floatTo16BitPCM(float32Array);
-
-        // 创建 WAV 文件
-        const wavBlob = createWavFile(pcmBuffer);
+        // 創建 WAV 文件
+        const wavFile = wavtools.createWaveFileData(mergedAudioData, sampleRate, numChannels);
+        const wavBlob = new Blob([wavFile], { type: 'audio/wav' });
 
         const audioUrl = URL.createObjectURL(wavBlob);
-        console.log('Audio URL:', audioUrl);
+        console.log('音頻 URL:', audioUrl);
 
-        // 创建音频元素并播放
+        // 創建音頻元素並播放
         const audioElement = new Audio(audioUrl);
         audioElement.oncanplaythrough = () => {
-            console.log('Audio can play through');
-            audioElement.play().catch(e => console.error('Failed to play audio:', e));
+            console.log('音頻可以播放');
+            audioElement.play().catch(e => console.error('無法播放音頻:', e));
         };
         audioElement.onerror = (e) => {
-            console.error('Audio error:', e);
-            console.error('Audio error code:', audioElement.error.code);
-            console.error('Audio error message:', audioElement.error.message);
+            console.error('音頻錯誤:', e);
+            console.error('音頻錯誤代碼:', audioElement.error.code);
+            console.error('音頻錯誤信息:', audioElement.error.message);
         };
 
-        // 添加音频消息到聊天窗口
+        // 添加音頻消息到聊天窗口
         addAudioMessage('AI', audioUrl, true);
 
-        // 清空音频数据
+        // 清空音頻數據
         audioDeltas = [];
     } else {
-        console.log('No audio data to play');
-    }
-}
-
-// 新增的辅助函数
-function base64ToFloat32Array(base64) {
-    const binaryString = atob(base64);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-    }
-    return new Float32Array(bytes.buffer);
-}
-
-function floatTo16BitPCM(float32Array) {
-    const buffer = new ArrayBuffer(float32Array.length * 2);
-    const view = new DataView(buffer);
-    for (let i = 0; i < float32Array.length; i++) {
-        let s = Math.max(-1, Math.min(1, float32Array[i]));
-        view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
-    }
-    return buffer;
-}
-
-function createWavFile(audioData, sampleRate = 44100) {
-    const wavHeader = new ArrayBuffer(44);
-    const view = new DataView(wavHeader);
-
-    // RIFF chunk descriptor
-    writeString(view, 0, 'RIFF');
-    view.setUint32(4, 36 + audioData.byteLength, true);
-    writeString(view, 8, 'WAVE');
-
-    // fmt sub-chunk
-    writeString(view, 12, 'fmt ');
-    view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true);
-    view.setUint16(22, 1, true);
-    view.setUint32(24, sampleRate, true);
-    view.setUint32(28, sampleRate * 2, true);
-    view.setUint16(32, 2, true);
-    view.setUint16(34, 16, true);
-
-    // data sub-chunk
-    writeString(view, 36, 'data');
-    view.setUint32(40, audioData.byteLength, true);
-
-    return new Blob([wavHeader, audioData], { type: 'audio/wav' });
-}
-
-function writeString(view, offset, string) {
-    for (let i = 0; i < string.length; i++) {
-        view.setUint8(offset + i, string.charCodeAt(i));
+        console.log('沒有音頻數據可播放');
     }
 }
 
