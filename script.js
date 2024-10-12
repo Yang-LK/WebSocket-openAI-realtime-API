@@ -80,6 +80,9 @@ ws.onmessage = event => {
             addMessage('AI', currentAudioTranscript, 'received');
             currentAudioTranscript = '';
             break;
+        case 'response.output_item.added':
+            console.log('收到新的輸出項:', message);
+            break;
         default:
             console.log('收到未處理的類型:', message.type);
     }
@@ -124,15 +127,25 @@ function stopRecording() {
 
 function sendAudioMessage() {
     const audioBlob = new Blob(audiodeltas, { type: 'audio/wav' });
-    const audioUrl = URL.createObjectURL(audioBlob);
 
-    // 在聊天室中添加音频元素
-    addAudioMessage('你', audioUrl);
-
-    // 将音频发送到服务器
+    // 使用 FileReader 讀取 Blob 數據
     const reader = new FileReader();
-    reader.onloadend = () => {
-        const base64Audio = reader.result.split(',')[1];
+    reader.onloadend = async () => {
+        // 獲取 ArrayBuffer
+        const arrayBuffer = reader.result;
+
+        // 使用 AudioContext 解碼音頻數據
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+
+        // 獲取單聲道數據
+        const channelData = audioBuffer.getChannelData(0);
+
+        // 將 Float32Array 轉換為 base64 編碼的 PCM16 數據
+        const base64AudioData = base64EncodeAudio(channelData);
+        //保存音頻數據
+        console.log('base64AudioData', base64AudioData);
+        // 發送音頻數據到服務器
         ws.send(JSON.stringify({
             type: "conversation.item.create",
             item: {
@@ -141,11 +154,13 @@ function sendAudioMessage() {
                 content: [
                     {
                         type: "input_audio",
-                        data: base64Audio
+                        audio: base64AudioData
                     }
                 ]
             }
         }));
+
+        // 發送 response.create 請求
         ws.send(JSON.stringify({
             type: "response.create",
             response: {
@@ -153,28 +168,40 @@ function sendAudioMessage() {
                 instructions: "Please assist the user in Traditional Chinese.",
                 voice: "alloy",
                 output_audio_format: "pcm16",
-                tools: [
-                    {
-                        type: "function",
-                        name: "calculate_sum",
-                        description: "Calculates the sum of two numbers.",
-                        parameters: {
-                            type: "object",
-                            properties: {
-                                a: { type: "number" },
-                                b: { type: "number" }
-                            },
-                            required: ["a", "b"]
-                        }
-                    }
-                ],
-                tool_choice: "auto",
-                temperature: 0.7,
-                max_output_tokens: 150
+                temperature: 0.7
             }
         }));
+
+        // 在聊天室中添加音頻元素
+        const audioUrl = URL.createObjectURL(audioBlob);
+        addAudioMessage('你', audioUrl);
     };
-    reader.readAsDataURL(audioBlob);
+    reader.readAsArrayBuffer(audioBlob);
+}
+
+// 將 Float32Array 轉換為 base64 編碼的 PCM16 數據
+function base64EncodeAudio(float32Array) {
+    const buffer = floatTo16BitPCM(float32Array);
+    let binary = '';
+    const bytes = new Uint8Array(buffer);
+    const chunkSize = 0x8000; // 32KB chunk size
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+        let chunk = bytes.subarray(i, i + chunkSize);
+        binary += String.fromCharCode.apply(null, chunk);
+    }
+    return btoa(binary);
+}
+
+// 將 Float32Array 轉換為 PCM16 ArrayBuffer
+function floatTo16BitPCM(float32Array) {
+    const buffer = new ArrayBuffer(float32Array.length * 2);
+    const view = new DataView(buffer);
+    let offset = 0;
+    for (let i = 0; i < float32Array.length; i++, offset += 2) {
+        let s = Math.max(-1, Math.min(1, float32Array[i]));
+        view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+    }
+    return buffer;
 }
 
 // 添加音频消息到聊天窗口
@@ -198,10 +225,7 @@ function addAudioMessage(sender, audioUrl, isAI = false) {
 // 发送文字消息
 function sendMessage() {
     let message = messageInput.value.trim();
-    if (message) {
-        // 添加提示詞
-        // message = "請用繁體中文回答：" + message;
-        
+    if (message) {       
         ws.send(JSON.stringify({
             type: "conversation.item.create",
             item: {
@@ -221,7 +245,7 @@ function sendMessage() {
             response: {
                 modalities: ["text", "audio"],
                 instructions: "Please assist the user in Traditional Chinese.",
-                voice: "shimmer",
+                voice: "alloy",
                 output_audio_format: "pcm16",
                 tools: [
                     {
@@ -262,6 +286,10 @@ function addMessage(sender, content, type) {
 
 // 更新最后一条AI消息
 function updateLastAIMessage(content) {
+    if (typeof content !== 'string' || content.trim() === '') {
+        console.warn('嘗試更新無效的 AI 消息內容:', content);
+        return;
+    }
     const lastMessage = chatMessages.lastElementChild;
     if (lastMessage && lastMessage.classList.contains('received')) {
         lastMessage.textContent = `AI: ${content}`;
