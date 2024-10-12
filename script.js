@@ -128,80 +128,72 @@ function stopRecording() {
 function sendAudioMessage() {
     const audioBlob = new Blob(audiodeltas, { type: 'audio/wav' });
 
-    // 使用 FileReader 讀取 Blob 數據
+    // 使用 FileReader 直接讀取 Blob 數據為 ArrayBuffer
     const reader = new FileReader();
     reader.onloadend = async () => {
-        // 獲取 ArrayBuffer
-        const arrayBuffer = reader.result;
+        try {
+            // 獲取 ArrayBuffer
+            const arrayBuffer = reader.result;
 
-        // 使用 AudioContext 解碼音頻數據
-        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+            // 使用 AudioContext 解碼音頻數據
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
 
-        // 獲取單聲道數據
-        const channelData = audioBuffer.getChannelData(0);
+            // 重採樣到 24kHz
+            const offlineContext = new OfflineAudioContext(1, audioBuffer.duration * 24000, 24000);
+            const source = offlineContext.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(offlineContext.destination);
+            source.start();
+            const resampled24kBuffer = await offlineContext.startRendering();
 
-        // 將 Float32Array 轉換為 base64 編碼的 PCM16 數據
-        const base64AudioData = base64EncodeAudio(channelData);
-        //保存音頻數據
-        console.log('base64AudioData', base64AudioData);
-        // 發送音頻數據到服務器
-        ws.send(JSON.stringify({
-            type: "conversation.item.create",
-            item: {
-                type: "message",
-                role: "user",
-                content: [
-                    {
-                        type: "input_audio",
-                        audio: base64AudioData
-                    }
-                ]
+            // 將 AudioBuffer 轉換為 Int16Array
+            const pcm16Data = new Int16Array(resampled24kBuffer.length);
+            const channelData = resampled24kBuffer.getChannelData(0);
+            for (let i = 0; i < channelData.length; i++) {
+                pcm16Data[i] = Math.max(-32768, Math.min(32767, Math.round(channelData[i] * 32767)));
             }
-        }));
 
-        // 發送 response.create 請求
-        ws.send(JSON.stringify({
-            type: "response.create",
-            response: {
-                modalities: ["text", "audio"],
-                instructions: "Please assist the user in Traditional Chinese.",
-                voice: "alloy",
-                output_audio_format: "pcm16",
-                temperature: 0.7
-            }
-        }));
+            // 將 Int16Array 轉換為 base64
+            const base64AudioData = btoa(String.fromCharCode.apply(null, new Uint8Array(pcm16Data.buffer)));
 
-        // 在聊天室中添加音頻元素
-        const audioUrl = URL.createObjectURL(audioBlob);
-        addAudioMessage('你', audioUrl);
+            console.log('處理後的 base64AudioData 長度:', base64AudioData.length);
+
+            // 發送音頻數據到服務器
+            ws.send(JSON.stringify({
+                type: "conversation.item.create",
+                item: {
+                    type: "message",
+                    role: "user",
+                    content: [
+                        {
+                            type: "input_audio",
+                            audio: base64AudioData
+                        }
+                    ]
+                }
+            }));
+
+            // 發送 response.create 請求
+            ws.send(JSON.stringify({
+                type: "response.create",
+                response: {
+                    modalities: ["text", "audio"],
+                    instructions: "使用中文回答",
+                    voice: "alloy",
+                    output_audio_format: "pcm16",
+                    temperature: 0.7
+                }
+            }));
+
+            // 在聊天室中添加音頻元素
+            const audioUrl = URL.createObjectURL(audioBlob);
+            addAudioMessage('你', audioUrl);
+        } catch (error) {
+            console.error('處理音頻時發生錯誤:', error);
+        }
     };
     reader.readAsArrayBuffer(audioBlob);
-}
-
-// 將 Float32Array 轉換為 base64 編碼的 PCM16 數據
-function base64EncodeAudio(float32Array) {
-    const buffer = floatTo16BitPCM(float32Array);
-    let binary = '';
-    const bytes = new Uint8Array(buffer);
-    const chunkSize = 0x8000; // 32KB chunk size
-    for (let i = 0; i < bytes.length; i += chunkSize) {
-        let chunk = bytes.subarray(i, i + chunkSize);
-        binary += String.fromCharCode.apply(null, chunk);
-    }
-    return btoa(binary);
-}
-
-// 將 Float32Array 轉換為 PCM16 ArrayBuffer
-function floatTo16BitPCM(float32Array) {
-    const buffer = new ArrayBuffer(float32Array.length * 2);
-    const view = new DataView(buffer);
-    let offset = 0;
-    for (let i = 0; i < float32Array.length; i++, offset += 2) {
-        let s = Math.max(-1, Math.min(1, float32Array[i]));
-        view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
-    }
-    return buffer;
 }
 
 // 添加音频消息到聊天窗口
@@ -309,7 +301,7 @@ messageInput.addEventListener('keypress', function(e) {
     }
 });
 
-// 修改 createAndPlayAudio 函数
+// 修改 createAndPlayAudio 函數
 function createAndPlayAudio() {
     if (audioDeltas.length > 0) {
         console.log('創建音頻，來自', audioDeltas.length, '個 delta');
